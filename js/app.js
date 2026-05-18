@@ -32,7 +32,24 @@
     uploading: false,
     uploadTargetId: null, // driveItemId of the folder to upload into
     previousVisit: null,  // folder object of detected previous visit for file copy
+    filesSort: { key: 'date', dir: 'desc' }, // 'date'|'name', 'asc'|'desc' — reset every page load
   };
+
+  function sortFiles() {
+    var key = state.filesSort.key;
+    var dir = state.filesSort.dir === 'desc' ? -1 : 1;
+    state.currentFiles.sort(function (a, b) {
+      var cmp;
+      if (key === 'date') {
+        var da = a.createdDateTime || '';
+        var db = b.createdDateTime || '';
+        cmp = da < db ? -1 : da > db ? 1 : 0;
+      } else {
+        cmp = (a.name || '').localeCompare(b.name || '', 'he', { numeric: true, sensitivity: 'base' });
+      }
+      return cmp * dir;
+    });
+  }
 
   // ============================================
   // DOM References
@@ -83,6 +100,9 @@
     filesToggle: document.getElementById('files-toggle'),
     filesToggleIcon: document.getElementById('files-toggle-icon'),
     filesToggleText: document.getElementById('files-toggle-text'),
+    filesSort: document.getElementById('files-sort'),
+    filesSortDate: document.getElementById('files-sort-date'),
+    filesSortName: document.getElementById('files-sort-name'),
     fileList: document.getElementById('file-list'),
     visitCopyPrompt: document.getElementById('visit-copy-prompt'),
     copyChoiceNumber: document.getElementById('copy-choice-number'),
@@ -429,6 +449,7 @@
         var files = items.filter(function (item) { return !item.folder; });
         state.currentItems = folders;
         state.currentFiles = files;
+        sortFiles();
         showLoading(false);
         if (state.breadcrumbs.length > 1) saveLocation();
 
@@ -646,6 +667,8 @@
     dom.filesToggleIcon.className = 'files-section__chevron' +
       (state.filesExpanded ? ' files-section__chevron--open' : '');
     dom.fileList.hidden = !state.filesExpanded;
+    dom.filesSort.hidden = !state.filesExpanded;
+    renderSortButtons();
     dom.fileList.innerHTML = '';
 
     if (!state.filesExpanded) return;
@@ -1396,6 +1419,27 @@
     state.filesExpanded = !state.filesExpanded;
     renderFiles();
   });
+
+  function handleSortClick(key) {
+    if (state.filesSort.key === key) {
+      state.filesSort.dir = state.filesSort.dir === 'desc' ? 'asc' : 'desc';
+    } else {
+      state.filesSort.key = key;
+      state.filesSort.dir = key === 'date' ? 'desc' : 'asc';
+    }
+    sortFiles();
+    renderFiles();
+  }
+  dom.filesSortDate.addEventListener('click', function () { handleSortClick('date'); });
+  dom.filesSortName.addEventListener('click', function () { handleSortClick('name'); });
+
+  function renderSortButtons() {
+    var arrow = state.filesSort.dir === 'desc' ? ' ▼' : ' ▲';
+    dom.filesSortDate.textContent = 'תאריך' + (state.filesSort.key === 'date' ? arrow : '');
+    dom.filesSortName.textContent = 'שם' + (state.filesSort.key === 'name' ? arrow : '');
+    dom.filesSortDate.classList.toggle('files-sort__btn--active', state.filesSort.key === 'date');
+    dom.filesSortName.classList.toggle('files-sort__btn--active', state.filesSort.key === 'name');
+  }
 
   dom.backBtn.addEventListener('click', function () {
     if (state.breadcrumbs.length > 1) {
