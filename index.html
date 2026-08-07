@@ -20,6 +20,17 @@
         <div class="header__accent"></div>
     </header>
 
+    <!-- Offline upload queue notification (shown when photos couldn't be uploaded) -->
+    <div id="offline-banner" class="offline-banner" hidden>
+        <div class="offline-banner__body">
+            <span class="offline-banner__icon">⚠️</span>
+            <span id="offline-banner-text" class="offline-banner__text"></span>
+        </div>
+        <button id="offline-download-btn" class="offline-banner__download-btn" type="button" hidden>
+            ⬇️ הורד תמונות למכשיר
+        </button>
+    </div>
+
     <main class="main">
         <!-- Saved location -->
         <div id="saved-location" class="saved-location" hidden>
