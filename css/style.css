@@ -77,6 +77,68 @@ ul {
 }
 
 /* ============================================
+   Offline queue notification banner
+   ============================================ */
+.offline-banner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.5;
+    border-bottom: 1px solid transparent;
+    direction: rtl;
+    text-align: right;
+}
+
+.offline-banner--warning {
+    background: var(--amber-light);
+    color: var(--amber);
+    border-color: rgba(198, 125, 10, 0.2);
+}
+
+.offline-banner--error {
+    background: var(--error-light);
+    color: var(--error);
+    border-color: rgba(192, 57, 43, 0.2);
+}
+
+.offline-banner__body {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+.offline-banner__icon {
+    flex-shrink: 0;
+    font-size: 1rem;
+    margin-top: 0.1rem;
+}
+
+.offline-banner__text {
+    flex: 1;
+}
+
+.offline-banner__download-btn {
+    align-self: stretch;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-sm);
+    border: 1.5px solid currentColor;
+    background: transparent;
+    color: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity var(--transition);
+    -webkit-tap-highlight-color: transparent;
+}
+
+.offline-banner__download-btn:active {
+    opacity: 0.7;
+}
+
+/* ============================================
    Header — Logo-driven brand bar
    ============================================ */
 .header {
