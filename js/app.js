@@ -16,6 +16,16 @@
   var STORAGE_TTL = 10 * 60 * 60 * 1000; // 10 hours
   var UPLOAD_MAX_BYTES = 3.5 * 1024 * 1024; // ~3.5MB blob → ~4.7MB base64, under 5MB webhook limit
 
+  // Offline queue
+  var UPLOAD_TIMEOUT_MS = 20 * 1000;           // 20s per file upload
+  var RETRY_DELAY_MS = 60 * 1000;              // 60s between retries
+  var MAX_IMMEDIATE_RETRIES = 3;               // 3 immediate retry cycles
+  var DEFERRED_RETRY_AFTER_HOURS = 6;          // hours before deferred retries kick in
+  var MAX_DEFERRED_RETRIES = 2;               // 2 deferred retry cycles
+  var OFFLINE_DB_NAME = 'nisim_offline';
+  var OFFLINE_DB_VERSION = 1;
+  var OFFLINE_STORE = 'queue';
+
   // ============================================
   // State
   // ============================================
@@ -234,11 +244,15 @@
   }
 
   function uploadFile(folderId, fileName, file) {
+    var _resizedBlob;
     return convertHeicIfNeeded(file)
       .then(function (converted) { return resizeImage(converted); })
-      .then(function (resized) { return blobToBase64(resized); })
+      .then(function (resized) {
+        _resizedBlob = resized; // capture for offline queuing on failure
+        return blobToBase64(resized);
+      })
       .then(function (base64Data) {
-        return fetch(UPLOAD_WEBHOOK, {
+        var fetchPromise = fetch(UPLOAD_WEBHOOK, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -246,13 +260,18 @@
             fileName: fileName,
             fileData: base64Data,
           }),
+        }).then(function (response) {
+          if (!response.ok) {
+            throw new Error('שגיאה בהעלאת קובץ: ' + response.status);
+          }
+          return response.json();
         });
+        return withTimeout(fetchPromise, UPLOAD_TIMEOUT_MS);
       })
-      .then(function (response) {
-        if (!response.ok) {
-          throw new Error('שגיאה בהעלאת קובץ: ' + response.status);
-        }
-        return response.json();
+      .catch(function (err) {
+        // Attach processed blob so the caller can save it offline
+        if (_resizedBlob) err._offlineBlob = _resizedBlob;
+        throw err;
       });
   }
 
@@ -305,6 +324,267 @@
         if (!response.ok) throw new Error('שגיאה בהעתקת קובץ: ' + response.status);
         return response.json();
       });
+  }
+
+  // ============================================
+  // Upload timeout helper
+  // ============================================
+  function withTimeout(promise, ms) {
+    var timer;
+    var timeoutPromise = new Promise(function (_, reject) {
+      timer = setTimeout(function () {
+        reject(new Error('timeout'));
+      }, ms);
+    });
+    return Promise.race([promise, timeoutPromise]).then(
+      function (v) { clearTimeout(timer); return v; },
+      function (e) { clearTimeout(timer); throw e; }
+    );
+  }
+
+  // ============================================
+  // Offline Queue (IndexedDB)
+  // ============================================
+  var _offlineDb = null;
+  var _retryTimer = null;
+
+  function openOfflineDb() {
+    if (_offlineDb) return Promise.resolve(_offlineDb);
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
+      req.onupgradeneeded = function (e) {
+        var db = e.target.result;
+        if (!db.objectStoreNames.contains(OFFLINE_STORE)) {
+          db.createObjectStore(OFFLINE_STORE, { keyPath: 'id', autoIncrement: true });
+        }
+      };
+      req.onsuccess = function (e) { _offlineDb = e.target.result; resolve(_offlineDb); };
+      req.onerror = function (e) { reject(e.target.error); };
+    });
+  }
+
+  function offlineTx(mode) {
+    return openOfflineDb().then(function (db) {
+      return db.transaction(OFFLINE_STORE, mode).objectStore(OFFLINE_STORE);
+    });
+  }
+
+  function addToOfflineQueue(targetFolderId, fileName, blob) {
+    return offlineTx('readwrite').then(function (store) {
+      return new Promise(function (resolve, reject) {
+        var req = store.add({
+          targetFolderId: targetFolderId,
+          fileName: fileName,
+          blob: blob,
+          date: new Date().toDateString(),
+          timestamp: Date.now(),
+          retryCount: 0,       // 1-3 = immediate retries; 4-5 = deferred retries
+          lastAttempt: Date.now(),
+        });
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function getOfflineQueue() {
+    return offlineTx('readonly').then(function (store) {
+      return new Promise(function (resolve, reject) {
+        var req = store.getAll();
+        req.onsuccess = function () { resolve(req.result || []); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function removeFromOfflineQueue(id) {
+    return offlineTx('readwrite').then(function (store) {
+      return new Promise(function (resolve, reject) {
+        var req = store.delete(id);
+        req.onsuccess = function () { resolve(); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function updateOfflineRecord(id, updates) {
+    return offlineTx('readwrite').then(function (store) {
+      return new Promise(function (resolve, reject) {
+        var getReq = store.get(id);
+        getReq.onsuccess = function () {
+          var rec = getReq.result;
+          if (!rec) { resolve(); return; }
+          Object.keys(updates).forEach(function (k) { rec[k] = updates[k]; });
+          var putReq = store.put(rec);
+          putReq.onsuccess = function () { resolve(rec); };
+          putReq.onerror = function () { reject(putReq.error); };
+        };
+        getReq.onerror = function () { reject(getReq.error); };
+      });
+    });
+  }
+
+  // Re-upload a processed blob (already resized/converted) from the offline queue
+  function uploadBlob(folderId, fileName, blob) {
+    return blobToBase64(blob).then(function (base64Data) {
+      var fetchPromise = fetch(UPLOAD_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId: folderId, fileName: fileName, fileData: base64Data }),
+      }).then(function (response) {
+        if (!response.ok) throw new Error('שגיאה בהעלאת קובץ: ' + response.status);
+        return response.json();
+      });
+      return withTimeout(fetchPromise, UPLOAD_TIMEOUT_MS);
+    });
+  }
+
+  // ============================================
+  // Offline Queue — Retry engine
+  // ============================================
+  // Download all queued photos from today to the device.
+  // Uses <a download> which works on both iOS (Files app) and Android (Downloads folder).
+  function downloadQueuedPhotos() {
+    getOfflineQueue().then(function (items) {
+      var today = new Date().toDateString();
+      var todayItems = items.filter(function (i) { return i.date === today; });
+      if (todayItems.length === 0) return;
+
+      // Stagger downloads 600ms apart — browsers block simultaneous programmatic downloads
+      todayItems.forEach(function (item, index) {
+        setTimeout(function () {
+          var url = URL.createObjectURL(item.blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = item.fileName;
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+        }, index * 600);
+      });
+    }).catch(function () {});
+  }
+
+  function setDownloadBtnVisible(visible) {
+    var btn = document.getElementById('offline-download-btn');
+    if (btn) btn.hidden = !visible;
+  }
+
+  function showOfflineNotification(type) {
+    var banner = document.getElementById('offline-banner');
+    var text = document.getElementById('offline-banner-text');
+    if (!banner || !text) return;
+    if (type === 'deferred') {
+      text.textContent = 'התמונות לא הועלו לשרת, ייעשה ניסיון נוסף מאוחר יותר או שתעלה אותם ידנית';
+      banner.className = 'offline-banner offline-banner--warning';
+      setDownloadBtnVisible(true);
+    } else if (type === 'final') {
+      text.textContent = 'התמונות מהביקור האחרון לא הועלו לשרת, נא וודא את הכנסתם לתיקייה הרלוונטית בשרת';
+      banner.className = 'offline-banner offline-banner--error';
+      setDownloadBtnVisible(true);
+    } else {
+      banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+  }
+
+  function scheduleRetry(delaySecs) {
+    if (_retryTimer) clearTimeout(_retryTimer);
+    _retryTimer = setTimeout(runRetryBatch, delaySecs);
+  }
+
+  function runRetryBatch() {
+    _retryTimer = null;
+    getOfflineQueue().then(function (items) {
+      var today = new Date().toDateString();
+      var todayItems = items.filter(function (i) { return i.date === today; });
+      if (todayItems.length === 0) return;
+
+      var promises = todayItems.map(function (item) {
+        return uploadBlob(item.targetFolderId, item.fileName, item.blob)
+          .then(function () {
+            return removeFromOfflineQueue(item.id).then(function () {
+              return { success: true, item: item };
+            });
+          })
+          .catch(function () {
+            return updateOfflineRecord(item.id, {
+              retryCount: item.retryCount + 1,
+              lastAttempt: Date.now(),
+            }).then(function (updated) {
+              return { success: false, item: updated || item };
+            });
+          });
+      });
+
+      Promise.all(promises).then(function (results) {
+        var failed = results.filter(function (r) { return !r.success; });
+        if (failed.length === 0) {
+          // All uploaded!
+          var banner = document.getElementById('offline-banner');
+          if (banner) banner.hidden = true;
+          return;
+        }
+
+        // Determine next action based on max retryCount among failed items
+        var maxRetry = Math.max.apply(null, failed.map(function (r) { return r.item.retryCount; }));
+
+        if (maxRetry < MAX_IMMEDIATE_RETRIES) {
+          // Still within immediate retries — schedule next in 60s
+          scheduleRetry(RETRY_DELAY_MS);
+        } else if (maxRetry === MAX_IMMEDIATE_RETRIES) {
+          // Just exhausted immediate retries
+          showOfflineNotification('deferred');
+          // Deferred retries triggered on next app open (see checkDeferredUploads)
+        } else if (maxRetry < MAX_IMMEDIATE_RETRIES + MAX_DEFERRED_RETRIES) {
+          // Inside deferred retries — schedule next in 60s
+          scheduleRetry(RETRY_DELAY_MS);
+        } else {
+          // All retries exhausted
+          showOfflineNotification('final');
+        }
+      });
+    }).catch(function () {
+      // DB error — silently ignore
+    });
+  }
+
+  // Called on app load: if there are pending items from today that exhausted
+  // immediate retries, and 6+ hours have passed, kick off deferred retries.
+  function checkDeferredUploads() {
+    getOfflineQueue().then(function (items) {
+      var today = new Date().toDateString();
+      var todayItems = items.filter(function (i) { return i.date === today; });
+      if (todayItems.length === 0) return;
+
+      // Show persistent banner for pending items
+      var banner = document.getElementById('offline-banner');
+      var text = document.getElementById('offline-banner-text');
+      if (banner && text) {
+        text.textContent = 'ישנן תמונות שלא הועלו לשרת (' + todayItems.length + ' קבצים)';
+        banner.className = 'offline-banner offline-banner--warning';
+        banner.hidden = false;
+        // Show download button if immediate retries already exhausted
+        var immediateExhausted = todayItems.some(function (i) { return i.retryCount >= MAX_IMMEDIATE_RETRIES; });
+        setDownloadBtnVisible(immediateExhausted);
+      }
+
+      // Check if ready for deferred retries
+      var deferredReady = todayItems.filter(function (i) {
+        return i.retryCount >= MAX_IMMEDIATE_RETRIES &&
+          i.retryCount < MAX_IMMEDIATE_RETRIES + MAX_DEFERRED_RETRIES;
+      });
+      if (deferredReady.length === 0) return;
+
+      var lastAttempt = Math.max.apply(null, deferredReady.map(function (i) { return i.lastAttempt; }));
+      var hoursSince = (Date.now() - lastAttempt) / (1000 * 60 * 60);
+      if (hoursSince >= DEFERRED_RETRY_AFTER_HOURS) {
+        runRetryBatch();
+      }
+    }).catch(function () {});
   }
 
   // ============================================
@@ -1346,9 +1626,13 @@
               photo.status = 'done';
               done++;
             })
-            .catch(function () {
+            .catch(function (err) {
               photo.status = 'error';
               failed++;
+              // Save the processed blob to offline queue for later retry
+              if (err._offlineBlob) {
+                addToOfflineQueue(targetId, fileName, err._offlineBlob).catch(function () {});
+              }
             })
             .then(function () {
               dom.progressFill.style.width = ((done + failed) / total * 100) + '%';
@@ -1361,6 +1645,11 @@
           state.uploading = false;
           dom.uploadProgress.hidden = true;
           showUploadResult(done, failed, total);
+
+          // Start retry cycle for any photos that were queued offline
+          if (failed > 0) {
+            scheduleRetry(RETRY_DELAY_MS);
+          }
 
           // Remove successfully uploaded photos, keep failed ones for retry
           state.photos = state.photos.filter(function (p) { return p.status === 'error'; });
@@ -1617,8 +1906,17 @@
     fetchAndDisplay('root');
   });
 
+  // Offline download button
+  var offlineDownloadBtn = document.getElementById('offline-download-btn');
+  if (offlineDownloadBtn) {
+    offlineDownloadBtn.addEventListener('click', function () {
+      downloadQueuedPhotos();
+    });
+  }
+
   // ============================================
   // Init
   // ============================================
+  checkDeferredUploads(); // check for pending offline photos on every app load
   loadRoot();
 })();
