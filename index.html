@@ -9,13 +9,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="/css/style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js"></script>
 </head>
 <body>
     <header class="header">
         <div class="header__brand">
-            <img src="LOGO.png" alt="מכון בקרה ניסים שוקר" class="header__logo">
+            <img src="/LOGO.png" alt="מכון בקרה ניסים שוקר" class="header__logo">
         </div>
         <div class="header__accent"></div>
     </header>
@@ -25,10 +25,22 @@
         <div class="offline-banner__body">
             <span class="offline-banner__icon">⚠️</span>
             <span id="offline-banner-text" class="offline-banner__text"></span>
+            <button id="offline-close-btn" class="offline-banner__close-btn" type="button" title="סגור">סגור</button>
         </div>
         <button id="offline-download-btn" class="offline-banner__download-btn" type="button" hidden>
             ⬇️ הורד תמונות למכשיר
         </button>
+    </div>
+
+    <!-- Confirmation dialog for clearing the offline queue -->
+    <div id="offline-confirm-overlay" class="offline-confirm-overlay" hidden>
+        <div class="offline-confirm-dialog" role="dialog" aria-modal="true">
+            <p class="offline-confirm-dialog__msg">הפעולה תסגור את ההתראה ותנקה את התמונות באחסון הזמני</p>
+            <div class="offline-confirm-dialog__actions">
+                <button id="offline-confirm-proceed" class="btn offline-confirm-dialog__btn offline-confirm-dialog__btn--danger" type="button">המשך</button>
+                <button id="offline-confirm-cancel" class="btn offline-confirm-dialog__btn offline-confirm-dialog__btn--secondary" type="button">בטל</button>
+            </div>
+        </div>
     </div>
 
     <main class="main">
@@ -177,6 +189,6 @@
         </div>
     </main>
 
-    <script src="js/app.js"></script>
+    <script src="/js/app.js"></script>
 </body>
 </html>
