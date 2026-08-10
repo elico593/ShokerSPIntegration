@@ -138,6 +138,92 @@ ul {
     opacity: 0.7;
 }
 
+.offline-banner__close-btn {
+    flex-shrink: 0;
+    margin-right: auto; /* pushes it to the left edge in RTL */
+    margin-left: 0;
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radius-sm);
+    border: 1.5px solid currentColor;
+    background: transparent;
+    color: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0.8;
+    transition: opacity var(--transition);
+    -webkit-tap-highlight-color: transparent;
+}
+
+.offline-banner__close-btn:active {
+    opacity: 0.5;
+}
+
+/* ============================================
+   Offline queue — confirmation dialog
+   ============================================ */
+.offline-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(26, 35, 50, 0.55);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+}
+
+.offline-confirm-dialog {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 1.5rem 1.25rem 1.25rem;
+    width: 100%;
+    max-width: 360px;
+    direction: rtl;
+    text-align: right;
+}
+
+.offline-confirm-dialog__msg {
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1.55;
+    color: var(--text);
+    margin-bottom: 1.25rem;
+}
+
+.offline-confirm-dialog__actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-start;
+}
+
+.offline-confirm-dialog__btn {
+    flex: 1;
+    padding: 0.65rem 0.75rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    border: none;
+    cursor: pointer;
+    transition: opacity var(--transition);
+    -webkit-tap-highlight-color: transparent;
+}
+
+.offline-confirm-dialog__btn--danger {
+    background: var(--error);
+    color: #fff;
+}
+
+.offline-confirm-dialog__btn--secondary {
+    background: var(--border);
+    color: var(--text);
+}
+
+.offline-confirm-dialog__btn:active {
+    opacity: 0.75;
+}
+
 /* ============================================
    Header — Logo-driven brand bar
    ============================================ */
