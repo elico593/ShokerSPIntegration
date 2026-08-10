@@ -529,6 +529,21 @@
           return;
         }
 
+        // *** NEW: Refresh banner count after partial success.
+        // Re-read the queue so the displayed number reflects items actually
+        // still pending, not the stale count set on app load.
+        getOfflineQueue().then(function (remaining) {
+          var today = new Date().toDateString();
+          var remainingToday = remaining.filter(function (i) { return i.date === today; });
+          var bannerText = document.getElementById('offline-banner-text');
+          // Only update the count line — don't overwrite 'deferred'/'final' messages
+          // which are set separately by showOfflineNotification().
+          if (bannerText && remainingToday.length > 0 &&
+              !bannerText.textContent.includes('לא הועלו לשרת,')) {
+            bannerText.textContent = 'ישנן תמונות שלא הועלו לשרת (' + remainingToday.length + ' קבצים)';
+          }
+        }).catch(function () {});
+
         // Determine next action based on max retryCount among failed items
         var maxRetry = Math.max.apply(null, failed.map(function (r) { return r.item.retryCount; }));
 
@@ -920,7 +935,7 @@
 
       var arrow = document.createElement('span');
       arrow.className = 'folder-card__arrow';
-      arrow.textContent = '\u2039'; // ‹
+      arrow.textContent = '‹'; // ‹
 
       btn.appendChild(icon);
       btn.appendChild(name);
@@ -1543,15 +1558,15 @@
       if (state.uploading) {
         var status = document.createElement('span');
         status.className = 'photo-item__status';
-        if (photo.status === 'done') status.textContent = '\u2705';
-        else if (photo.status === 'error') status.textContent = '\u274C';
-        else if (photo.status === 'uploading') status.textContent = '\u23F3';
+        if (photo.status === 'done') status.textContent = '✅';
+        else if (photo.status === 'error') status.textContent = '❌';
+        else if (photo.status === 'uploading') status.textContent = '⏳';
         li.appendChild(status);
       } else {
         var removeBtn = document.createElement('button');
         removeBtn.className = 'photo-item__remove';
         removeBtn.type = 'button';
-        removeBtn.textContent = '\u00D7';
+        removeBtn.textContent = '×';
         removeBtn.title = 'הסר';
         (function (idx) {
           removeBtn.addEventListener('click', function () { removePhoto(idx); });
@@ -1911,6 +1926,68 @@
   if (offlineDownloadBtn) {
     offlineDownloadBtn.addEventListener('click', function () {
       downloadQueuedPhotos();
+    });
+  }
+
+  // Offline banner — סגור button with confirmation dialog
+
+  // Remove every record from the offline queue (called after user confirms).
+  function clearOfflineQueue() {
+    return offlineTx('readwrite').then(function (store) {
+      return new Promise(function (resolve, reject) {
+        var req = store.clear();
+        req.onsuccess = function () { resolve(); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  var offlineConfirmOverlay = document.getElementById('offline-confirm-overlay');
+
+  function showOfflineConfirm() {
+    if (offlineConfirmOverlay) offlineConfirmOverlay.hidden = false;
+  }
+
+  function hideOfflineConfirm() {
+    if (offlineConfirmOverlay) offlineConfirmOverlay.hidden = true;
+  }
+
+  // "סגור" button — opens the confirmation dialog
+  var offlineCloseBtn = document.getElementById('offline-close-btn');
+  if (offlineCloseBtn) {
+    offlineCloseBtn.addEventListener('click', function () {
+      showOfflineConfirm();
+    });
+  }
+
+  // "המשך" — clear the queue and hide the banner
+  var offlineConfirmProceed = document.getElementById('offline-confirm-proceed');
+  if (offlineConfirmProceed) {
+    offlineConfirmProceed.addEventListener('click', function () {
+      // Cancel any pending retry timer so it doesn't fire after the queue is cleared
+      if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+      clearOfflineQueue()
+        .catch(function () {})
+        .then(function () {
+          hideOfflineConfirm();
+          var banner = document.getElementById('offline-banner');
+          if (banner) banner.hidden = true;
+        });
+    });
+  }
+
+  // "בטל" — close the dialog, leave everything as-is
+  var offlineConfirmCancel = document.getElementById('offline-confirm-cancel');
+  if (offlineConfirmCancel) {
+    offlineConfirmCancel.addEventListener('click', function () {
+      hideOfflineConfirm();
+    });
+  }
+
+  // Close on backdrop tap (outside the dialog box)
+  if (offlineConfirmOverlay) {
+    offlineConfirmOverlay.addEventListener('click', function (e) {
+      if (e.target === offlineConfirmOverlay) hideOfflineConfirm();
     });
   }
 
