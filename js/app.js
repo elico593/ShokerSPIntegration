@@ -1666,8 +1666,13 @@
             scheduleRetry(RETRY_DELAY_MS);
           }
 
-          // Remove successfully uploaded photos, keep failed ones for retry
-          state.photos = state.photos.filter(function (p) { return p.status === 'error'; });
+          // Remove all photos from the UI after upload:
+          // - successful ones are on the server
+          // - failed ones are now in the offline queue, managed by the retry engine
+          //   (keeping them visible would let the user re-upload and create duplicate queue entries)
+          state.photos = state.photos.filter(function (p) {
+            return p.status !== 'done' && p.status !== 'error';
+          });
           renderPhotos();
           updateUploadBtn();
 
