@@ -17,7 +17,7 @@
   var UPLOAD_MAX_BYTES = 3.5 * 1024 * 1024; // ~3.5MB blob → ~4.7MB base64, under 5MB webhook limit
 
   // Offline queue
-  var UPLOAD_TIMEOUT_MS = 20 * 1000;           // 20s per file upload
+  var UPLOAD_TIMEOUT_MS = 60 * 1000;           // 60s per file upload
   var RETRY_DELAY_MS = 60 * 1000;              // 60s between retries
   var MAX_IMMEDIATE_RETRIES = 3;               // 3 immediate retry cycles
   var DEFERRED_RETRY_AFTER_HOURS = 6;          // hours before deferred retries kick in
@@ -579,12 +579,10 @@
       var banner = document.getElementById('offline-banner');
       var text = document.getElementById('offline-banner-text');
       if (banner && text) {
-        text.textContent = 'ישנן תמונות שלא הועלו לשרת (' + todayItems.length + ' קבצים)';
+        text.textContent = 'ישנן תמונות שלא הועלו לשרת (' + todayItems.length + ' קבצים) ייעשה ניסיון להעלותם, או שניתן להורידם לתיקיית ההורדות במכשיר';
         banner.className = 'offline-banner offline-banner--warning';
         banner.hidden = false;
-        // Show download button if immediate retries already exhausted
-        var immediateExhausted = todayItems.some(function (i) { return i.retryCount >= MAX_IMMEDIATE_RETRIES; });
-        setDownloadBtnVisible(immediateExhausted);
+        setDownloadBtnVisible(true);
       }
 
       // Check if ready for deferred retries
@@ -1664,6 +1662,15 @@
           // Start retry cycle for any photos that were queued offline
           if (failed > 0) {
             scheduleRetry(RETRY_DELAY_MS);
+            // Show banner immediately with download button
+            var offlineBanner = document.getElementById('offline-banner');
+            var offlineBannerText = document.getElementById('offline-banner-text');
+            if (offlineBanner && offlineBannerText) {
+              offlineBannerText.textContent = 'ישנן תמונות שלא הועלו לשרת (' + failed + ' קבצים) ייעשה ניסיון להעלותם, או שניתן להורידם לתיקיית ההורדות במכשיר';
+              offlineBanner.className = 'offline-banner offline-banner--warning';
+              offlineBanner.hidden = false;
+              setDownloadBtnVisible(true);
+            }
           }
 
           // Remove all photos from the UI after upload:
@@ -1707,10 +1714,10 @@
       dom.resultText.textContent = 'הועלו בהצלחה ' + total + ' תמונות!';
       dom.resultText.className = 'upload-result__text upload-result__text--success';
     } else if (done === 0) {
-      dom.resultText.textContent = 'ההעלאה נכשלה. נסה שוב.';
+      dom.resultText.textContent = 'העלאת הקבצים לשרת נכשלה, המערכת תמשיך לנסות להעלותם ברקע';
       dom.resultText.className = 'upload-result__text upload-result__text--error';
     } else {
-      dom.resultText.textContent = done + ' מתוך ' + total + ' הועלו. ' + failed + ' נכשלו.';
+      dom.resultText.textContent = 'העלאת הקבצים לשרת נכשלה, המערכת תמשיך לנסות להעלותם ברקע';
       dom.resultText.className = 'upload-result__text upload-result__text--partial';
     }
   }
