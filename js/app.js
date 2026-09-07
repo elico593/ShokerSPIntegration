@@ -567,8 +567,10 @@
     });
   }
 
-  // Called on app load: if there are pending items from today that exhausted
-  // immediate retries, and 6+ hours have passed, kick off deferred retries.
+  // Called on app load: retry any pending items from today.
+  // - Items with retryCount < MAX_IMMEDIATE_RETRIES: retry immediately on every app open
+  //   (fixes the case where the app was closed before the in-memory timer could fire)
+  // - Items with retryCount >= MAX_IMMEDIATE_RETRIES: only retry after 6 hours (deferred)
   function checkDeferredUploads() {
     getOfflineQueue().then(function (items) {
       var today = new Date().toDateString();
@@ -585,7 +587,17 @@
         setDownloadBtnVisible(true);
       }
 
-      // Check if ready for deferred retries
+      // If any items still have immediate retries left, retry now (app may have been
+      // closed before the 60-second in-memory timer could fire)
+      var immediateReady = todayItems.filter(function (i) {
+        return i.retryCount < MAX_IMMEDIATE_RETRIES;
+      });
+      if (immediateReady.length > 0) {
+        runRetryBatch();
+        return;
+      }
+
+      // All items have exhausted immediate retries — apply the 6-hour gate
       var deferredReady = todayItems.filter(function (i) {
         return i.retryCount >= MAX_IMMEDIATE_RETRIES &&
           i.retryCount < MAX_IMMEDIATE_RETRIES + MAX_DEFERRED_RETRIES;
